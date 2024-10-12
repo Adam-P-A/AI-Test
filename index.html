@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <title>Symulacja Robota</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #f0f0f0;
+        }
+        #controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(255, 255, 255, 0.8);
+            padding: 10px;
+            border-radius: 5px;
+        }
+        button {
+            margin: 5px;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <div id="controls">
+        <button id="saveBtn">Zapisz Postęp</button>
+        <button id="loadBtn">Wczytaj Postęp</button>
+    </div>
+
+    <script>
+        // Ustawienia canvas
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        // Stałe fizyczne
+        const GRAVITY = 0.5;
+        const FLOOR_Y = canvas.height - 50;
+
+        // Timer
+        let startTime = Date.now();
+
+        // Robot
+        class Robot {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.size = 50;
+                this.velocityY = 0;
+                this.onGround = false;
+
+                // Noga składająca się z dwóch segmentów
+                this.leg = {
+                    upper: { angle: 0, length: 50, angularVelocity: 0 },
+                    lower: { angle: 0, length: 50, angularVelocity: 0 }
+                }
+
+                // Prostą kontrolę AI (może być zastąpiona bardziej zaawansowaną)
+                this.controlTimer = 0;
+                this.moveDirection = 1; // 1: do przodu, -1: do tyłu
+            }
+
+            update() {
+                // Aktualizacja czasu kontrolera
+                this.controlTimer++;
+                if (this.controlTimer > 60) { // Zmiana kierunku co sekundę
+                    this.moveDirection *= -1;
+                    this.controlTimer = 0;
+                }
+
+                // Prosta kontrola nogi
+                this.leg.upper.angle += this.moveDirection * 0.05;
+                this.leg.lower.angle -= this.moveDirection * 0.05;
+
+                // Fizyka
+                if (!this.onGround) {
+                    this.velocityY += GRAVITY;
+                    this.y += this.velocityY;
+                    if (this.y + this.size >= FLOOR_Y) {
+                        this.y = FLOOR_Y - this.size;
+                        this.velocityY = 0;
+                        this.onGround = true;
+                    }
+                }
+
+                // Reset timer
+                const elapsed = (Date.now() - startTime) / 1000;
+                if (elapsed > 30) {
+                    resetSimulation();
+                }
+
+                // Sprawdzenie osiągnięcia celu
+                if (this.x >= target.x - target.size / 2) {
+                    alert("Gratulacje! Robot osiągnął cel.");
+                    resetSimulation();
+                }
+            }
+
+            draw(ctx) {
+                // Rysowanie korpusu
+                ctx.fillStyle = 'blue';
+                ctx.fillRect(this.x, this.y, this.size, this.size);
+
+                // Rysowanie nogi
+                ctx.strokeStyle = 'black';
+                ctx.lineWidth = 5;
+
+                // Punkt początkowy nogi
+                const startX = this.x + this.size / 2;
+                const startY = this.y + this.size;
+
+                // Segment górny
+                const upperEndX = startX + this.leg.upper.length * Math.cos(this.leg.upper.angle);
+                const upperEndY = startY + this.leg.upper.length * Math.sin(this.leg.upper.angle);
+                ctx.beginPath();
+                ctx.moveTo(startX, startY);
+                ctx.lineTo(upperEndX, upperEndY);
+                ctx.stroke();
+
+                // Segment dolny
+                const lowerEndX = upperEndX + this.leg.lower.length * Math.cos(this.leg.lower.angle);
+                const lowerEndY = upperEndY + this.leg.lower.length * Math.sin(this.leg.lower.angle);
+                ctx.beginPath();
+                ctx.moveTo(upperEndX, upperEndY);
+                ctx.lineTo(lowerEndX, lowerEndY);
+                ctx.stroke();
+            }
+        }
+
+        // Cel
+        const target = {
+            x: canvas.width - 100,
+            y: FLOOR_Y - 50,
+            size: 50
+        };
+
+        // Inicjalizacja robota
+        let robot = new Robot(100, FLOOR_Y - 50);
+
+        // Reset symulacji
+        function resetSimulation() {
+            robot = new Robot(100, FLOOR_Y - 50);
+            startTime = Date.now();
+        }
+
+        // Zapis i wczytywanie postępu
+        document.getElementById('saveBtn').addEventListener('click', () => {
+            const data = {
+                x: robot.x,
+                y: robot.y,
+                leg: robot.leg,
+                velocityY: robot.velocityY,
+                onGround: robot.onGround,
+                moveDirection: robot.moveDirection
+            };
+            const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'robot_progress.json';
+            a.click();
+            URL.revokeObjectURL(url);
+        });
+
+        document.getElementById('loadBtn').addEventListener('click', () => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = 'application/json';
+            input.onchange = e => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = event => {
+                    const data = JSON.parse(event.target.result);
+                    robot.x = data.x;
+                    robot.y = data.y;
+                    robot.leg = data.leg;
+                    robot.velocityY = data.velocityY;
+                    robot.onGround = data.onGround;
+                    robot.moveDirection = data.moveDirection;
+                    startTime = Date.now();
+                };
+                reader.readAsText(file);
+            };
+            input.click();
+        });
+
+        // Główna pętla animacji
+        function animate() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Rysowanie podłoża
+            ctx.fillStyle = 'green';
+            ctx.fillRect(0, FLOOR_Y, canvas.width, canvas.height - FLOOR_Y);
+
+            // Rysowanie celu
+            ctx.fillStyle = 'red';
+            ctx.fillRect(target.x - target.size / 2, target.y - target.size, target.size, target.size);
+
+            // Aktualizacja i rysowanie robota
+            robot.update();
+            robot.draw(ctx);
+
+            requestAnimationFrame(animate);
+        }
+
+        animate();
+
+        // Obsługa zmiany rozmiaru okna
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        });
+    </script>
+</body>
+</html>
